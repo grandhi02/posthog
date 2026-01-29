@@ -21,9 +21,9 @@ export interface StepLayoutSettingsProps {
 
 export function StepLayoutSettings({ step, onChange, showPosition = true }: StepLayoutSettingsProps): JSX.Element {
     return (
-        <div className="flex gap-12 items-start">
-            <div className="w-80">
-                <label className="text-sm font-medium block mb-2">Width</label>
+        <div className="space-y-4">
+            <div>
+                <label className="text-xs font-medium text-muted block mb-1.5">Width</label>
                 <div className="flex items-center gap-3 mb-2">
                     <LemonSlider
                         value={getWidthValue(step.maxWidth)}
@@ -33,7 +33,7 @@ export function StepLayoutSettings({ step, onChange, showPosition = true }: Step
                         step={10}
                         className="flex-1"
                     />
-                    <span className="text-sm text-muted w-12 text-right">{getWidthValue(step.maxWidth)}px</span>
+                    <span className="text-xs text-muted w-10 text-right">{getWidthValue(step.maxWidth)}px</span>
                 </div>
                 <LemonSegmentedButton
                     size="small"
@@ -45,7 +45,7 @@ export function StepLayoutSettings({ step, onChange, showPosition = true }: Step
 
             {showPosition && (
                 <div>
-                    <label className="text-sm font-medium block mb-2">Position</label>
+                    <label className="text-xs font-medium text-muted block mb-1.5">Position</label>
                     <PositionSelector
                         value={step.modalPosition ?? SurveyPosition.MiddleCenter}
                         onChange={(position: ScreenPosition) => onChange({ modalPosition: position })}

@@ -2,11 +2,13 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 import { actionToUrl, router, urlToAction } from 'kea-router'
+import isEqual from 'lodash.isequal'
 
 import { lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
 import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { NEW_FLAG } from 'scenes/feature-flags/featureFlagLogic'
 import { Scene } from 'scenes/sceneTypes'
 import { sceneConfigurations } from 'scenes/scenes'
 import { urls } from 'scenes/urls'
@@ -16,6 +18,7 @@ import {
     Breadcrumb,
     FeatureFlagBasicType,
     FeatureFlagFilters,
+    FeatureFlagType,
     ProductTour,
     ProductTourBannerConfig,
     ProductTourContent,
@@ -25,6 +28,11 @@ import {
 import { prepareStepsForRender } from './editor/generateStepHtml'
 import type { productTourLogicType } from './productTourLogicType'
 import { isAnnouncement, productToursLogic } from './productToursLogic'
+
+export const DEFAULT_TARGETING_FILTERS: FeatureFlagType['filters'] = {
+    ...NEW_FLAG.filters,
+    groups: [{ ...NEW_FLAG.filters.groups[0], rollout_percentage: 100 }],
+}
 
 /**
  * Builds a HogQL date filter clause from a DateRange.
@@ -326,7 +334,7 @@ export const productTourLogic = kea<productTourLogicType>([
                     return undefined
                 }
 
-                for (const step of content.steps || []) {
+                for (const [index, step] of (content.steps || []).entries()) {
                     let error: string | undefined
 
                     if (step.type === 'banner') {
@@ -336,9 +344,19 @@ export const productTourLogic = kea<productTourLogicType>([
                             error = validateBannerAction(step.bannerConfig?.action, 'Banner click action')
                         }
                     } else {
+                        const errorPrefix = content.steps.length > 1 ? `Step ${index + 1} ` : ''
+
                         error =
-                            validateButton(step.buttons?.primary, 'Primary button') ||
-                            validateButton(step.buttons?.secondary, 'Secondary button')
+                            validateButton(step.buttons?.primary, `${errorPrefix}Primary button`) ||
+                            validateButton(step.buttons?.secondary, `${errorPrefix}Secondary button`)
+                    }
+
+                    if (step.type === 'element') {
+                        if (step.useManualSelector && !step.selector?.trim()) {
+                            error = `Step ${index + 1} missing element selector`
+                        } else if (!step.useManualSelector && !step.inferenceData) {
+                            error = `Select an element for step ${index + 1}`
+                        }
                     }
 
                     if (error) {
@@ -538,6 +556,12 @@ export const productTourLogic = kea<productTourLogicType>([
                     }
                 }
                 return undefined
+            },
+        ],
+        hasCustomTargeting: [
+            (s) => [s.targetingFlagFilters],
+            (targetingFlagFilters: FeatureFlagFilters | undefined): boolean => {
+                return !!targetingFlagFilters && !isEqual(targetingFlagFilters, DEFAULT_TARGETING_FILTERS)
             },
         ],
         entityKeyword: [
