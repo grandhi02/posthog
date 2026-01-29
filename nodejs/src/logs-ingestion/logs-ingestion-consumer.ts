@@ -284,7 +284,7 @@ export class LogsIngestionConsumer {
             await this.kafkaProducer!.produce({
                 topic: this.dlqTopic,
                 value: message.message.value,
-                key: message.message.key,
+                key: null,
                 headers: {
                     ...parseKafkaHeaders(message.message.headers),
                     token: message.token,
