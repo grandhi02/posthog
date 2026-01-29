@@ -105,9 +105,11 @@ export const SURVEY_SDK_REQUIREMENTS: SurveyFeatureRequirement[] = [
     },
     {
         feature: 'Repeated survey activation (show every time)',
-        sdkVersions: { 'posthog-js': '1.234.11' },
+        sdkVersions: {
+            'posthog-js': '1.234.11',
+            'posthog-react-native': '4.27.0',
+        },
         unsupportedSdks: [
-            { sdk: 'posthog-react-native', issue: 'https://github.com/PostHog/posthog-js/issues/2961' },
             { sdk: 'posthog-ios', issue: 'https://github.com/PostHog/posthog-ios/issues/446' },
             { sdk: 'posthog-android', issue: 'https://github.com/PostHog/posthog-android/issues/389' },
             { sdk: 'posthog_flutter', issue: 'https://github.com/PostHog/posthog-flutter/issues/260' },
@@ -140,9 +142,11 @@ export const SURVEY_SDK_REQUIREMENTS: SurveyFeatureRequirement[] = [
     },
     {
         feature: 'Auto-submit on selection',
-        sdkVersions: { 'posthog-js': '1.244.0' },
+        sdkVersions: {
+            'posthog-js': '1.244.0',
+            'posthog-react-native': '4.26.0',
+        },
         unsupportedSdks: [
-            { sdk: 'posthog-react-native', issue: 'https://github.com/PostHog/posthog-js/issues/2963' },
             { sdk: 'posthog-ios', issue: 'https://github.com/PostHog/posthog-ios/issues/448' },
             { sdk: 'posthog-android', issue: 'https://github.com/PostHog/posthog-android/issues/391' },
             { sdk: 'posthog_flutter', issue: 'https://github.com/PostHog/posthog-flutter/issues/262' },
