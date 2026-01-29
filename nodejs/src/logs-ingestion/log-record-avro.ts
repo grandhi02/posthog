@@ -114,7 +114,7 @@ export async function encodeLogRecords(logRecordType: avro.Type, records: LogRec
  * Flattens a JSON object into a flat key-value map with dot-notation keys.
  * Arrays are indexed with numeric keys (e.g., "items.0.name").
  */
-export function flattenJson(obj: unknown, prefix = '', result: Record<string, string> = {}): Record<string, string> {
+export function flattenJson(obj: unknown, prefix = '', result: Record<string, any> = {}): Record<string, any> {
     if (obj === null || obj === undefined) {
         if (prefix) {
             result[prefix] = String(obj)
@@ -124,7 +124,7 @@ export function flattenJson(obj: unknown, prefix = '', result: Record<string, st
 
     if (typeof obj !== 'object') {
         if (prefix) {
-            result[prefix] = String(obj)
+            result[prefix] = obj
         }
         return result
     }
@@ -173,7 +173,7 @@ export function extractJsonAttributesFromBody(body: string | null): Record<strin
             break
         }
         count++
-        newAttributes[key] = JSON.stringify(value.toString())
+        newAttributes[key] = JSON.stringify(value)
     }
 
     return newAttributes
