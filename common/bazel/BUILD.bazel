@@ -120,5 +120,7 @@ py_library(
         "@pypi//pillow",
         "@pypi//django_prometheus",
         "@pypi//webauthn",
+        "@pypi//asyncstdlib",
+        "@pypi//duckdb",
     ],
 )
