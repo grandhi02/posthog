@@ -12,6 +12,7 @@ import { closeHub, createHub } from '../../src/utils/db/hub'
 import { PostgresUse } from '../../src/utils/db/postgres'
 import { KAFKA_APP_METRICS_2 } from '../config/kafka-topics'
 import { parseJSON } from '../utils/json-parse'
+import { LogRecord, encodeLogRecords } from './log-record-avro'
 import {
     LogsIngestionConsumer,
     logMessageDlqCounter,
@@ -38,11 +39,54 @@ jest.mock('../utils/posthog', () => {
 
 let offsetIncrementer = 0
 
-const createKafkaMessage = (logData: any, headers: Record<string, string> = {}): Message => {
+const createKafkaMessage = async (logData: any, headers: Record<string, string> = {}): Promise<Message> => {
+    // Create a LogRecord from the log data
+    const record: LogRecord = {
+        uuid: `test-uuid-${offsetIncrementer}`,
+        trace_id: null,
+        span_id: null,
+        trace_flags: null,
+        timestamp: DateTime.now().toMillis() * 1000, // microseconds
+        observed_timestamp: DateTime.now().toMillis() * 1000,
+        body: JSON.stringify(logData),
+        severity_text: logData.level || 'info',
+        severity_number: 9,
+        service_name: logData.service || 'test-service',
+        resource_attributes: null,
+        instrumentation_scope: null,
+        event_name: null,
+        attributes: null,
+    }
+
+    // Encode as AVRO
+    const avro = require('avsc')
+    const logRecordType = avro.Type.forSchema({
+        type: 'record',
+        name: 'LogRecord',
+        fields: [
+            { name: 'uuid', type: ['null', 'string'] },
+            { name: 'trace_id', type: ['null', 'bytes'] },
+            { name: 'span_id', type: ['null', 'bytes'] },
+            { name: 'trace_flags', type: ['null', 'int'] },
+            { name: 'timestamp', type: ['null', 'long'] },
+            { name: 'observed_timestamp', type: ['null', 'long'] },
+            { name: 'body', type: ['null', 'string'] },
+            { name: 'severity_text', type: ['null', 'string'] },
+            { name: 'severity_number', type: ['null', 'int'] },
+            { name: 'service_name', type: ['null', 'string'] },
+            { name: 'resource_attributes', type: ['null', { type: 'map', values: 'string' }] },
+            { name: 'instrumentation_scope', type: ['null', 'string'] },
+            { name: 'event_name', type: ['null', 'string'] },
+            { name: 'attributes', type: ['null', { type: 'map', values: 'string' }] },
+        ],
+    })
+
+    const value = await encodeLogRecords(logRecordType, [record])
+
     return {
         key: null,
-        value: Buffer.from(JSON.stringify(logData)),
-        size: 1,
+        value,
+        size: value.length,
         topic: 'test',
         offset: offsetIncrementer++,
         timestamp: DateTime.now().toMillis(),
@@ -53,11 +97,8 @@ const createKafkaMessage = (logData: any, headers: Record<string, string> = {}):
     }
 }
 
-const createKafkaMessages: (logData: any[], headers?: Record<string, string>) => Message[] = (
-    logData,
-    headers = {}
-) => {
-    return logData.map((data) => createKafkaMessage(data, headers))
+const createKafkaMessages = async (logData: any[], headers: Record<string, string> = {}): Promise<Message[]> => {
+    return Promise.all(logData.map((data) => createKafkaMessage(data, headers)))
 }
 
 describe('LogsIngestionConsumer', () => {
@@ -153,7 +194,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should process a valid log message', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -168,7 +209,7 @@ describe('LogsIngestionConsumer', () => {
                 createLogMessage({ level: 'error', message: 'Second log' }),
                 createLogMessage({ level: 'debug', message: 'Third log' }),
             ]
-            const messages = createKafkaMessages(logData, {
+            const messages = await createKafkaMessages(logData, {
                 token: team.api_token,
             })
 
@@ -183,7 +224,7 @@ describe('LogsIngestionConsumer', () => {
     describe('message parsing and validation', () => {
         it('should drop messages with missing token', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 // missing token
             })
 
@@ -194,7 +235,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should drop messages with invalid token', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: 'invalid-token',
             })
 
@@ -205,7 +246,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should preserve kafka message headers', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 myHeader: 'hello',
                 token: team.api_token,
             })
@@ -218,7 +259,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should overwrite existing headers', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
                 team_id: '999',
             })
@@ -259,7 +300,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should process batch with valid messages', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -278,7 +319,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should produce messages with correct headers', async () => {
             const logData = createLogMessage({ level: 'error', message: 'Critical error' })
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -314,7 +355,7 @@ describe('LogsIngestionConsumer', () => {
             hub.teamManager['lazyLoader'].markForRefresh(String(team.id))
 
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -352,7 +393,7 @@ describe('LogsIngestionConsumer', () => {
     describe('error handling', () => {
         it('should handle producer errors gracefully', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -368,7 +409,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should send failed messages to DLQ', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -410,7 +451,7 @@ describe('LogsIngestionConsumer', () => {
     describe('message routing', () => {
         it('should route messages to correct ClickHouse topic', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -426,12 +467,12 @@ describe('LogsIngestionConsumer', () => {
             const logData2 = createLogMessage({ message: 'Team 2 log' })
 
             const messages = [
-                ...createKafkaMessages([logData1], {
+                ...(await createKafkaMessages([logData1], {
                     token: team.api_token,
-                }),
-                ...createKafkaMessages([logData2], {
+                })),
+                ...(await createKafkaMessages([logData2], {
                     token: team2.api_token,
-                }),
+                })),
             ]
 
             await waitForBackgroundTasks(consumer.processKafkaBatch(messages))
@@ -460,7 +501,7 @@ describe('LogsIngestionConsumer', () => {
                 user_id: 'user-456',
             })
 
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -524,18 +565,18 @@ describe('LogsIngestionConsumer', () => {
             const logData2 = createLogMessage({ message: 'Second' })
 
             const messages = [
-                ...createKafkaMessages([logData1], {
+                ...(await createKafkaMessages([logData1], {
                     token: team.api_token,
                     bytes_uncompressed: '1024',
                     bytes_compressed: '512',
                     record_count: '5',
-                }),
-                ...createKafkaMessages([logData2], {
+                })),
+                ...(await createKafkaMessages([logData2], {
                     token: team.api_token,
                     bytes_uncompressed: '2048',
                     bytes_compressed: '1024',
                     record_count: '10',
-                }),
+                })),
             ]
 
             await waitForBackgroundTasks(consumer.processKafkaBatch(messages))
@@ -556,7 +597,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should handle missing header values with defaults', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
             })
 
@@ -571,7 +612,7 @@ describe('LogsIngestionConsumer', () => {
     describe('filterRateLimitedMessages', () => {
         it('should return usageStats with correct structure for allowed messages', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
                 bytes_uncompressed: '1024',
                 record_count: '5',
@@ -595,16 +636,16 @@ describe('LogsIngestionConsumer', () => {
 
         it('should aggregate stats for multiple messages from same team', async () => {
             const messages = [
-                ...createKafkaMessages([createLogMessage()], {
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team.api_token,
                     bytes_uncompressed: '100',
                     record_count: '1',
-                }),
-                ...createKafkaMessages([createLogMessage()], {
+                })),
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team.api_token,
                     bytes_uncompressed: '200',
                     record_count: '2',
-                }),
+                })),
             ]
 
             const parsed = await consumer['_parseKafkaBatch'](messages)
@@ -619,16 +660,16 @@ describe('LogsIngestionConsumer', () => {
 
         it('should track separate stats for different teams', async () => {
             const messages = [
-                ...createKafkaMessages([createLogMessage()], {
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team.api_token,
                     bytes_uncompressed: '100',
                     record_count: '1',
-                }),
-                ...createKafkaMessages([createLogMessage()], {
+                })),
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team2.api_token,
                     bytes_uncompressed: '200',
                     record_count: '2',
-                }),
+                })),
             ]
 
             const parsed = await consumer['_parseKafkaBatch'](messages)
@@ -648,16 +689,16 @@ describe('LogsIngestionConsumer', () => {
             consumer = await createLogsIngestionConsumer(hub)
 
             const messages = [
-                ...createKafkaMessages([createLogMessage()], {
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team.api_token,
                     bytes_uncompressed: '512', // Fits in bucket
                     record_count: '1',
-                }),
-                ...createKafkaMessages([createLogMessage()], {
+                })),
+                ...(await createKafkaMessages([createLogMessage()], {
                     token: team.api_token,
                     bytes_uncompressed: '2048', // Exceeds remaining bucket
                     record_count: '5',
-                }),
+                })),
             ]
 
             const parsed = await consumer['_parseKafkaBatch'](messages)
@@ -831,7 +872,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should emit usage metrics to app_metrics2 topic', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
                 bytes_uncompressed: '1024',
                 record_count: '5',
@@ -858,7 +899,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should emit correct metric values per team', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
                 bytes_uncompressed: '2048',
                 record_count: '10',
@@ -895,16 +936,16 @@ describe('LogsIngestionConsumer', () => {
             const logData2 = createLogMessage({ message: 'Second - will be dropped' })
 
             const messages = [
-                ...createKafkaMessages([logData1], {
+                ...(await createKafkaMessages([logData1], {
                     token: team.api_token,
                     bytes_uncompressed: '512',
                     record_count: '2',
-                }),
-                ...createKafkaMessages([logData2], {
+                })),
+                ...(await createKafkaMessages([logData2], {
                     token: team.api_token,
                     bytes_uncompressed: '2048',
                     record_count: '8',
-                }),
+                })),
             ]
 
             await waitForBackgroundTasks(consumer.processKafkaBatch(messages))
@@ -928,16 +969,16 @@ describe('LogsIngestionConsumer', () => {
             const logData2 = createLogMessage({ message: 'Second' })
 
             const messages = [
-                ...createKafkaMessages([logData1], {
+                ...(await createKafkaMessages([logData1], {
                     token: team.api_token,
                     bytes_uncompressed: '100',
                     record_count: '1',
-                }),
-                ...createKafkaMessages([logData2], {
+                })),
+                ...(await createKafkaMessages([logData2], {
                     token: team.api_token,
                     bytes_uncompressed: '200',
                     record_count: '2',
-                }),
+                })),
             ]
 
             await waitForBackgroundTasks(consumer.processKafkaBatch(messages))
@@ -961,16 +1002,16 @@ describe('LogsIngestionConsumer', () => {
             const logData2 = createLogMessage({ message: 'Team 2' })
 
             const messages = [
-                ...createKafkaMessages([logData1], {
+                ...(await createKafkaMessages([logData1], {
                     token: team.api_token,
                     bytes_uncompressed: '100',
                     record_count: '1',
-                }),
-                ...createKafkaMessages([logData2], {
+                })),
+                ...(await createKafkaMessages([logData2], {
                     token: team2.api_token,
                     bytes_uncompressed: '200',
                     record_count: '2',
-                }),
+                })),
             ]
 
             await waitForBackgroundTasks(consumer.processKafkaBatch(messages))
@@ -997,7 +1038,7 @@ describe('LogsIngestionConsumer', () => {
 
         it('should not emit metrics with zero count', async () => {
             const logData = createLogMessage()
-            const messages = createKafkaMessages([logData], {
+            const messages = await createKafkaMessages([logData], {
                 token: team.api_token,
                 bytes_uncompressed: '100',
                 record_count: '1',
