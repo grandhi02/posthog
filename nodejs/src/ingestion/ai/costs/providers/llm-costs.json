@@ -3645,10 +3645,6 @@
                 "completion_token": 0.000003,
                 "cache_read_token": 1.0000000000000001e-7
             },
-            "gmicloud-int4": {
-                "prompt_token": 5.7e-7,
-                "completion_token": 0.00000285
-            },
             "moonshotai": {
                 "prompt_token": 6e-7,
                 "completion_token": 0.000003,
