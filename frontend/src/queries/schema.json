@@ -22635,7 +22635,7 @@
             "type": "object"
         },
         "ProjectSecretAPIKeyAllowedScope": {
-            "enum": ["feature_flag:read", "INTERNAL"],
+            "enum": ["feature_flag:read", "PLACEHOLDER"],
             "type": "string"
         },
         "ProjectSecretAPIKeyRequest": {

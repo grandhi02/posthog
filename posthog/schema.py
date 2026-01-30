@@ -2957,7 +2957,7 @@ class ProductKey(StrEnum):
 
 class ProjectSecretAPIKeyAllowedScope(StrEnum):
     FEATURE_FLAG_READ = "feature_flag:read"
-    INTERNAL = "INTERNAL"
+    PLACEHOLDER = "PLACEHOLDER"
 
 
 class ProjectSecretAPIKeyRequest(BaseModel):

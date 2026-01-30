@@ -5390,5 +5390,5 @@ export interface ProjectSecretAPIKeyRequest {
 export enum ProjectSecretAPIKeyAllowedScope {
     FeatureFlagRead = 'feature_flag:read',
     // Placeholder to keep this as an enum (remove once a second real scope is added)
-    _Internal = 'INTERNAL',
+    _Placeholder = 'PLACEHOLDER',
 }
