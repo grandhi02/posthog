@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use crate::kafka::rebalance_handler::RebalanceHandler;
 use crate::kafka::types::Partition;
 use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance};
-use rdkafka::{ClientContext, TopicPartitionList};
+use rdkafka::{ClientContext, Offset, TopicPartitionList};
 use tracing::{error, info, warn};
 
 /// Events sent to the async rebalance worker
@@ -22,6 +22,12 @@ pub enum RebalanceEvent {
 pub enum ConsumerCommand {
     /// Resume consumption for the specified partitions (after checkpoint import completes)
     Resume(TopicPartitionList),
+    /// Seek to a specific offset for a topic/partition (local consumer position only, not committed offsets)
+    Seek {
+        topic: String,
+        partition: i32,
+        offset: Offset,
+    },
 }
 
 /// Sender for consumer commands - passed to rebalance handler

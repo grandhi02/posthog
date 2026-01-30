@@ -144,6 +144,30 @@ where
                                 );
                             }
                         }
+                        ConsumerCommand::Seek { topic, partition, offset } => {
+                            info!(
+                                topic = %topic,
+                                partition = partition,
+                                offset = ?offset,
+                                "Received seek command"
+                            );
+                            if let Err(e) = consumer.seek(&topic, partition, offset, Duration::from_secs(5)) {
+                                error!(
+                                    topic = %topic,
+                                    partition = partition,
+                                    offset = ?offset,
+                                    error = %e,
+                                    "Failed to seek partition"
+                                );
+                            } else {
+                                info!(
+                                    topic = %topic,
+                                    partition = partition,
+                                    offset = ?offset,
+                                    "Successfully seeked partition"
+                                );
+                            }
+                        }
                     }
                 }
 

@@ -939,6 +939,7 @@ mod tests {
                     "Resume command should contain all assigned partitions"
                 );
             }
+            other => panic!("Expected Resume command, got {:?}", other),
         }
 
         // Verify stores were created
@@ -1017,7 +1018,9 @@ mod tests {
 
         // Should have received exactly one Resume command (from the last rebalance)
         let cmd = rx.try_recv().expect("Should have received Resume command");
-        let ConsumerCommand::Resume(tpl) = cmd;
+        let ConsumerCommand::Resume(tpl) = cmd else {
+            panic!("Expected Resume command, got {:?}", cmd);
+        };
         // Should resume both partitions
         assert_eq!(tpl.count(), 2, "Should resume all owned partitions");
 
@@ -1113,6 +1116,7 @@ mod tests {
                     "Partition 1 should NOT be in Resume (not owned)"
                 );
             }
+            other => panic!("Expected Resume command, got {:?}", other),
         }
 
         // Verify stores
@@ -1357,6 +1361,7 @@ mod tests {
                 let elements = tpl.elements();
                 assert_eq!(elements[0].partition(), 0, "Should resume partition 0");
             }
+            other => panic!("Expected Resume command, got {:?}", other),
         }
 
         // Verify partition 0's store still exists after B completes
@@ -1436,6 +1441,7 @@ mod tests {
                 assert!(topics.contains(&"topic-a"), "topic-a:0 should be resumed");
                 assert!(topics.contains(&"topic-b"), "topic-b:0 should be resumed");
             }
+            other => panic!("Expected Resume command, got {:?}", other),
         }
 
         // Verify stores created for owned partitions only

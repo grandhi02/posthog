@@ -569,3 +569,153 @@ async fn test_offset_commits_with_routing_processor() -> Result<()> {
 
     Ok(())
 }
+
+/// Integration test that verifies seek resets local consume position.
+///
+/// This test:
+/// 1. Creates a topic with 10 messages (offsets 0-9)
+/// 2. Consumes all 10 messages
+/// 3. Sends a Seek command to reset position to offset 5
+/// 4. Verifies messages 5-9 are re-delivered (5 messages)
+#[tokio::test]
+async fn test_seek_resets_local_consume_position() -> Result<()> {
+    use kafka_deduplicator::kafka::batch_context::ConsumerCommand;
+    use rdkafka::Offset;
+
+    let test_topic = format!("{}-seek-{}", TEST_TOPIC_BASE, uuid::Uuid::now_v7());
+    let group_id = format!("test-group-seek-{}", uuid::Uuid::now_v7());
+    let messages_to_send = 10;
+    let seek_to_offset = 5i64;
+
+    // Step 1: Create topic and send messages
+    create_topic_with_partitions(&test_topic, 1).await?;
+    let test_messages = generate_test_messages(messages_to_send);
+    send_test_messages_to_partition(&test_topic, 0, test_messages).await?;
+
+    // Step 2: Set up consumer with TestRebalanceHandler
+    let mut config = ClientConfig::new();
+    config
+        .set("bootstrap.servers", KAFKA_BROKERS)
+        .set("group.id", &group_id)
+        .set("enable.auto.commit", "false")
+        .set("auto.offset.reset", "earliest")
+        .set("session.timeout.ms", "6000")
+        .set("heartbeat.interval.ms", "2000");
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    // Track received message offsets
+    let received_offsets: Arc<std::sync::Mutex<Vec<i64>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received_offsets_clone = received_offsets.clone();
+
+    // Create processor that tracks message offsets
+    struct OffsetTrackingProcessor {
+        offsets: Arc<std::sync::Mutex<Vec<i64>>>,
+    }
+
+    #[async_trait]
+    impl BatchConsumerProcessor<CapturedEvent> for OffsetTrackingProcessor {
+        async fn process_batch(&self, messages: Vec<KafkaMessage<CapturedEvent>>) -> Result<()> {
+            let mut offsets = self.offsets.lock().unwrap();
+            for msg in messages {
+                offsets.push(msg.get_offset());
+            }
+            Ok(())
+        }
+    }
+
+    let processor = Arc::new(OffsetTrackingProcessor {
+        offsets: received_offsets_clone,
+    });
+    let coordinator = create_test_tracker();
+    let offset_tracker = Arc::new(OffsetTracker::new(coordinator));
+    let rebalance_handler = Arc::new(TestRebalanceHandler::default());
+
+    let consumer = BatchConsumer::<CapturedEvent>::new(
+        &config,
+        rebalance_handler.clone(),
+        processor,
+        offset_tracker,
+        shutdown_rx,
+        &test_topic,
+        5, // small batch size
+        Duration::from_millis(50),
+        Duration::from_secs(60), // long commit interval to avoid committing during test
+    )?;
+
+    // Step 3: Start consumption
+    let consumer_handle = tokio::spawn(async move { consumer.start_consumption().await });
+
+    // Wait for initial messages to be consumed
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(10);
+    while received_offsets.lock().unwrap().len() < messages_to_send {
+        if start.elapsed() > timeout {
+            panic!(
+                "Timeout waiting for initial messages. Got {} of {}",
+                received_offsets.lock().unwrap().len(),
+                messages_to_send
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Verify we received all 10 messages initially
+    assert_eq!(
+        received_offsets.lock().unwrap().len(),
+        messages_to_send,
+        "Should have received all initial messages"
+    );
+
+    // Step 4: Send Seek command to reset to offset 5
+    let command_sender = rebalance_handler
+        .get_command_sender()
+        .expect("Command sender should be available after partition assignment");
+
+    command_sender
+        .send(ConsumerCommand::Seek {
+            topic: test_topic.clone(),
+            partition: 0,
+            offset: Offset::Offset(seek_to_offset),
+        })
+        .expect("Failed to send seek command");
+
+    // Wait for more messages to arrive (should get messages 5-9 again)
+    let expected_after_seek = messages_to_send + (messages_to_send - seek_to_offset as usize);
+    let start = std::time::Instant::now();
+    while received_offsets.lock().unwrap().len() < expected_after_seek {
+        if start.elapsed() > timeout {
+            break; // Don't panic yet, check what we got
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Step 5: Verify we received messages again after seek
+    let final_offsets = received_offsets.lock().unwrap().clone();
+    assert!(
+        final_offsets.len() >= expected_after_seek,
+        "Should have received messages after seek. Expected at least {}, got {}. Offsets: {:?}",
+        expected_after_seek,
+        final_offsets.len(),
+        final_offsets
+    );
+
+    // Verify the seek worked by checking that offsets 5-9 appear twice
+    let offsets_5_to_9: Vec<_> = final_offsets
+        .iter()
+        .filter(|&&o| o >= seek_to_offset)
+        .collect();
+    assert!(
+        offsets_5_to_9.len() >= 10, // 5 from initial + 5 from after seek
+        "Offsets 5-9 should appear at least twice after seek. Found {} instances: {:?}",
+        offsets_5_to_9.len(),
+        offsets_5_to_9
+    );
+
+    // Cleanup
+    let _ = shutdown_tx.send(());
+    let _ = consumer_handle.await;
+
+    Ok(())
+}
