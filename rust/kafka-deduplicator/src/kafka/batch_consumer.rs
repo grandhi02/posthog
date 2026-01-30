@@ -26,6 +26,9 @@ use tokio::sync::oneshot::Receiver;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
+/// Timeout for consumer.seek() operations
+const SEEK_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[async_trait]
 pub trait BatchConsumerProcessor<T>: Send + Sync {
     async fn process_batch(&self, messages: Vec<KafkaMessage<T>>) -> Result<()>;
@@ -151,7 +154,7 @@ where
                                 offset = ?offset,
                                 "Received seek command"
                             );
-                            if let Err(e) = consumer.seek(&topic, partition, offset, Duration::from_secs(5)) {
+                            if let Err(e) = consumer.seek(&topic, partition, offset, SEEK_TIMEOUT) {
                                 error!(
                                     topic = %topic,
                                     partition = partition,
