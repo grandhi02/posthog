@@ -11,7 +11,7 @@ Two cache variants are provided:
 - flags_without_cohorts_hypercache: Cohort filters transformed to properties for simple clients
 
 Cache Key Pattern:
-- Uses api_token as the key (token-based cache)
+- Uses team_id as the key (ID-based cache)
 - Stored in both Redis and S3 via HyperCache
 
 Dual-Write Behavior:
@@ -511,7 +511,6 @@ flags_hypercache = HyperCache(
     namespace="feature_flags",
     value="flags_with_cohorts.json",
     load_fn=lambda key: _get_flags_response_for_local_evaluation(HyperCache.team_from_key(key), include_cohorts=True),
-    token_based=True,
     cache_ttl=settings.FLAGS_CACHE_TTL,
     cache_miss_ttl=settings.FLAGS_CACHE_MISS_TTL,
     batch_load_fn=lambda teams: _get_flags_response_for_local_evaluation_batch(teams, include_cohorts=True),
@@ -523,7 +522,6 @@ flags_without_cohorts_hypercache = HyperCache(
     namespace="feature_flags",
     value="flags_without_cohorts.json",
     load_fn=lambda key: _get_flags_response_for_local_evaluation(HyperCache.team_from_key(key), include_cohorts=False),
-    token_based=True,
     cache_ttl=settings.FLAGS_CACHE_TTL,
     cache_miss_ttl=settings.FLAGS_CACHE_MISS_TTL,
     batch_load_fn=lambda teams: _get_flags_response_for_local_evaluation_batch(teams, include_cohorts=False),
@@ -700,7 +698,7 @@ def clear_flag_definition_caches(team: Team, kinds: list[str] | None = None):
     # Remove from expiry tracking sorted sets
     try:
         redis_client = get_client(settings.REDIS_URL)
-        identifier = team.api_token  # Token-based cache
+        identifier = team.id  # ID-based cache
         redis_client.zrem(FLAG_DEFINITIONS_CACHE_EXPIRY_SORTED_SET, str(identifier))
         redis_client.zrem(FLAG_DEFINITIONS_NO_COHORTS_CACHE_EXPIRY_SORTED_SET, str(identifier))
     except Exception as e:

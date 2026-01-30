@@ -606,6 +606,20 @@ class TestFlagDefinitionsCache(BaseTest):
         super().setUp()
         clear_flag_definition_caches(self.team, kinds=["redis", "s3"])
 
+    def test_cache_key_format_is_stable(self):
+        """
+        Ensure cache key format doesn't change accidentally.
+
+        Changing the key format would orphan existing cached data,
+        causing a cold cache on deploy.
+        """
+        # Cache keys should use team ID (not api_token)
+        with_cohorts_key = flags_hypercache.get_cache_key(self.team)
+        without_cohorts_key = flags_without_cohorts_hypercache.get_cache_key(self.team)
+
+        assert with_cohorts_key == f"cache/teams/{self.team.id}/feature_flags/flags_with_cohorts.json"
+        assert without_cohorts_key == f"cache/teams/{self.team.id}/feature_flags/flags_without_cohorts.json"
+
     def test_update_flag_definitions_cache_updates_both_variants(self):
         """Test that update_flag_definitions_cache updates both with/without cohorts variants."""
         FeatureFlag.objects.create(
@@ -1069,16 +1083,3 @@ class TestFlagDefinitionsCacheWithoutRedis(BaseTest):
         # Without Redis URL configured, the HyperCache will still work but won't track expiry
         # The update should complete successfully
         assert result is True
-
-    def test_management_commands_error_without_redis_url(self):
-        """Test management commands fail gracefully without FLAGS_REDIS_URL."""
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        out = StringIO()
-        call_command("verify_flag_definitions_cache", f"--team-ids={self.team.id}", stdout=out)
-
-        output = out.getvalue()
-        assert "FLAGS_REDIS_URL" in output
-        assert "NOT configured" in output

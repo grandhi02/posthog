@@ -50,10 +50,6 @@ class Command(BaseHyperCacheCommand):
         )
 
     def handle(self, *args, **options):
-        # Check if dedicated flags cache is configured (fail fast)
-        if not self.check_dedicated_cache_configured():
-            return
-
         team_ids = options.get("team_ids")
         sample_size = options.get("sample")
         verbose = options.get("verbose", False)
