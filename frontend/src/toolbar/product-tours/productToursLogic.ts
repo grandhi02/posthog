@@ -283,6 +283,7 @@ export const productToursLogic = kea<productToursLogicType>([
                 selectTour: () => null,
                 newTour: () => null,
                 removeStep: () => null,
+                startPreviewMode: () => null,
             },
         ],
         sidebarTransitioning: [
