@@ -1,6 +1,6 @@
 """
 Activity 6 of the video segment clustering workflow:
-Persisting Tasks and TaskReferences.
+Persisting Signals and SignalReferences.
 """
 
 from datetime import timedelta
@@ -13,7 +13,7 @@ from temporalio import activity
 
 from posthog.models.team import Team
 from posthog.temporal.ai.video_segment_clustering.data import count_distinct_persons
-from posthog.temporal.ai.video_segment_clustering.models import PersistTasksActivityInputs, PersistTasksResult
+from posthog.temporal.ai.video_segment_clustering.models import PersistSignalsActivityInputs, PersistSignalsResult
 from posthog.temporal.ai.video_segment_clustering.priority import (
     calculate_priority_score,
     calculate_task_metrics,
@@ -21,26 +21,26 @@ from posthog.temporal.ai.video_segment_clustering.priority import (
     parse_timestamp_to_seconds,
 )
 
-from products.tasks.backend.models import Task, TaskReference
+from products.tasks.backend.models import Signal, SignalReference
 
 logger = structlog.get_logger(__name__)
 
 
 @activity.defn
-async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistTasksResult:
-    """Persists new Tasks and updates existing relevant ones, creating TaskReferences in the process."""
+async def persist_signals_activity(inputs: PersistSignalsActivityInputs) -> PersistSignalsResult:
+    """Persists new Signals and updates existing relevant ones, creating SignalReferences in the process."""
     team = await Team.objects.aget(id=inputs.team_id)
 
     segment_lookup = {s.document_id: s for s in inputs.segments}
 
-    task_ids: list[str] = []
-    tasks_created = 0
-    tasks_updated = 0
+    signal_ids: list[str] = []
+    signals_created = 0
+    signals_updated = 0
 
-    # Build cluster_to_task mapping as we create tasks
-    cluster_to_task: dict[int, str] = {}
+    # Build cluster_to_signal mapping as we create signals
+    cluster_to_signal: dict[int, str] = {}
 
-    # 1. Create new Tasks for new clusters
+    # 1. Create new Signals for new clusters
     for cluster in inputs.new_clusters:
         label = inputs.labels.get(cluster.cluster_id)
         if not label:
@@ -54,11 +54,10 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
             relevant_user_count=metrics["relevant_user_count"],
         )
 
-        task = await Task.objects.acreate(
+        signal = await Signal.objects.acreate(
             team=team,
             title=label.title,
-            description=label.description,
-            origin_product=Task.OriginProduct.SESSION_SUMMARIES,
+            task_prompt=label.description,
             cluster_centroid=cluster.centroid,
             cluster_centroid_updated_at=django_timezone.now(),
             priority_score=priority,
@@ -67,45 +66,45 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
             last_occurrence_at=metrics["last_occurrence_at"],
         )
 
-        task_ids.append(str(task.id))
-        cluster_to_task[cluster.cluster_id] = str(task.id)
-        tasks_created += 1
+        signal_ids.append(str(signal.id))
+        cluster_to_signal[cluster.cluster_id] = str(signal.id)
+        signals_created += 1
 
         logger.info(
-            "Created task from cluster",
-            task_id=str(task.id),
+            "Created signal from cluster",
+            signal_id=str(signal.id),
             cluster_id=cluster.cluster_id,
             cluster_size=cluster.size,
         )
 
-    # 2. Update existing Tasks for matched clusters (idempotent - only count new segments)
+    # 2. Update existing Signals for matched clusters (idempotent - only count new segments)
     for match in inputs.matched_clusters:
         try:
-            task = await Task.objects.aget(id=match.task_id)
-        except Task.DoesNotExist:
-            logger.warning("Matched task not found", task_id=match.task_id)
+            signal = await Signal.objects.aget(id=match.signal_id)
+        except Signal.DoesNotExist:
+            logger.warning("Matched signal not found", signal_id=match.signal_id)
             continue
 
-        cluster_to_task[match.cluster_id] = match.task_id
+        cluster_to_signal[match.cluster_id] = match.signal_id
 
         # Find segments for this matched cluster from segment_to_cluster
         matched_segment_ids = [doc_id for doc_id, cid in inputs.segment_to_cluster.items() if cid == match.cluster_id]
         cluster_segments = [segment_lookup[sid] for sid in matched_segment_ids if sid in segment_lookup]
 
         if cluster_segments:
-            # Check which segments already have TaskReferences for this task (idempotency)
-            relevant_task_references = [
-                task_reference
-                async for task_reference in TaskReference.objects.filter(task_id=match.task_id).only(
+            # Check which segments already have SignalReferences for this signal (idempotency)
+            relevant_signal_references = [
+                signal_reference
+                async for signal_reference in SignalReference.objects.filter(signal_id=match.signal_id).only(
                     "session_id", "start_time", "end_time", "distinct_id"
                 )
             ]
             existing_refs: set[str] = set()
-            for ref in relevant_task_references:
+            for ref in relevant_signal_references:
                 end_time_str = ref.end_time.isoformat() if ref.end_time else ""
                 existing_refs.add(f"{ref.session_id}:{ref.start_time.isoformat()}:{end_time_str}")
 
-            # Filter to only NEW segments (not already linked to this task)
+            # Filter to only NEW segments (not already linked to this signal)
             new_segments = []
             for seg in cluster_segments:
                 session_start = parse_datetime_as_utc(seg.session_start_time)
@@ -117,14 +116,14 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
 
             if new_segments:
                 # Get all distinct_ids from existing refs + new segments for accurate user count
-                existing_distinct_ids = {ref.distinct_id for ref in relevant_task_references}
+                existing_distinct_ids = {ref.distinct_id for ref in relevant_signal_references}
                 new_distinct_ids = {seg.distinct_id for seg in new_segments}
                 relevant_user_count = await sync_to_async(count_distinct_persons)(
                     team, list(existing_distinct_ids | new_distinct_ids)
                 )
 
-                task.relevant_user_count = relevant_user_count
-                task.occurrence_count = (task.occurrence_count or 0) + len(new_segments)
+                signal.relevant_user_count = relevant_user_count
+                signal.occurrence_count = (signal.occurrence_count or 0) + len(new_segments)
 
                 # Find most recent occurrence from new segments
                 for segment in new_segments:
@@ -132,36 +131,36 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
                     segment_start_time = session_start_time + timedelta(
                         seconds=parse_timestamp_to_seconds(segment.start_time)
                     )
-                    if task.last_occurrence_at is None or segment_start_time > task.last_occurrence_at:
-                        task.last_occurrence_at = segment_start_time
+                    if signal.last_occurrence_at is None or segment_start_time > signal.last_occurrence_at:
+                        signal.last_occurrence_at = segment_start_time
 
-                task.priority_score = calculate_priority_score(
-                    relevant_user_count=task.relevant_user_count,
+                signal.priority_score = calculate_priority_score(
+                    relevant_user_count=signal.relevant_user_count,
                 )
 
-                await task.asave()
-                tasks_updated += 1
+                await signal.asave()
+                signals_updated += 1
 
                 logger.info(
-                    "Updated task from matched cluster",
-                    task_id=str(task.id),
+                    "Updated signal from matched cluster",
+                    signal_id=str(signal.id),
                     cluster_id=match.cluster_id,
                     new_segments=len(new_segments),
                     skipped_existing=len(cluster_segments) - len(new_segments),
                 )
 
-        task_ids.append(str(task.id))
+        signal_ids.append(str(signal.id))
 
-    # 3. Create TaskReference records in bulk (idempotent via ignore_conflicts)
-    refs_to_create: list[TaskReference] = []
+    # 3. Create SignalReference records in bulk (idempotent via ignore_conflicts)
+    refs_to_create: list[SignalReference] = []
 
     for segment in inputs.segments:
         cluster_id = inputs.segment_to_cluster.get(segment.document_id)
         if cluster_id is None:
             continue
 
-        task_id = cluster_to_task.get(cluster_id)
-        if not task_id:
+        signal_id = cluster_to_signal.get(cluster_id)
+        if not signal_id:
             continue
 
         session_start_time = parse_datetime_as_utc(segment.session_start_time)
@@ -169,8 +168,8 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
         segment_end_time = session_start_time + timedelta(seconds=parse_timestamp_to_seconds(segment.end_time))
 
         refs_to_create.append(
-            TaskReference(
-                task_id=task_id,
+            SignalReference(
+                signal_id=signal_id,
                 session_id=segment.session_id,
                 start_time=segment_start_time,
                 end_time=segment_end_time,
@@ -181,14 +180,14 @@ async def persist_tasks_activity(inputs: PersistTasksActivityInputs) -> PersistT
         )
 
     if refs_to_create:
-        created_refs = await TaskReference.objects.abulk_create(refs_to_create, ignore_conflicts=True)
+        created_refs = await SignalReference.objects.abulk_create(refs_to_create, ignore_conflicts=True)
         links_created = len(created_refs)
     else:
         links_created = 0
 
-    return PersistTasksResult(
-        tasks_created=tasks_created,
-        tasks_updated=tasks_updated,
-        task_ids=task_ids,
+    return PersistSignalsResult(
+        signals_created=signals_created,
+        signals_updated=signals_updated,
+        signal_ids=signal_ids,
         links_created=links_created,
     )

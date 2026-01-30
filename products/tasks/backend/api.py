@@ -22,11 +22,12 @@ from posthog.auth import OAuthAccessTokenAuthentication, PersonalAPIKeyAuthentic
 from posthog.permissions import APIScopePermission, PostHogFeatureFlagPermission
 from posthog.storage import object_storage
 
-from .models import Task, TaskReference, TaskRun
+from .models import Signal, SignalReference, Task, TaskRun
 from .serializers import (
     ErrorResponseSerializer,
+    SignalReferenceSerializer,
+    SignalSerializer,
     TaskListQuerySerializer,
-    TaskReferenceSerializer,
     TaskRunAppendLogRequestSerializer,
     TaskRunArtifactPresignRequestSerializer,
     TaskRunArtifactPresignResponseSerializer,
@@ -62,7 +63,6 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             "destroy",
             "run",
             "cluster_video_segments",
-            "references",
         ]
     }
 
@@ -112,8 +112,6 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         # Prefetch runs to avoid N+1 queries when fetching latest_run
         qs = qs.prefetch_related("runs")
-        # Annotate reference_count to avoid N+1 queries
-        qs = qs.annotate(reference_count=Count("references"))
 
         return qs
 
@@ -216,8 +214,8 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                     "error": result.get("error"),
                     "segments_processed": result.get("segments_processed"),
                     "clusters_found": result.get("clusters_found"),
-                    "tasks_created": result.get("tasks_created"),
-                    "tasks_updated": result.get("tasks_updated"),
+                    "signals_created": result.get("signals_created"),
+                    "signals_updated": result.get("signals_updated"),
                     "links_created": result.get("links_created"),
                 },
                 status=response_status,
@@ -229,21 +227,52 @@ class TaskViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+
+@extend_schema(tags=["signals"])
+class SignalViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
+    """
+    API for viewing and managing signals within a project.
+    Signals are auto-generated patterns from session analysis that may become tasks.
+    """
+
+    serializer_class = SignalSerializer
+    authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+    permission_classes = [IsAuthenticated, APIScopePermission, PostHogFeatureFlagPermission]
+    scope_object = "signal"
+    queryset = Signal.objects.all()
+    posthog_feature_flag = {"tasks": ["list", "retrieve", "destroy", "references"]}
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def safely_get_queryset(self, queryset):
+        qs = queryset.filter(team=self.team).order_by("-priority_score", "-created_at")
+
+        # Annotate reference_count to avoid N+1 queries
+        qs = qs.annotate(reference_count=Count("references"))
+
+        return qs
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "team": self.team}
+
+    def perform_destroy(self, instance):
+        """Deleting a signal removes it permanently."""
+        instance.delete()
+
     @validated_request(
         request_serializer=None,
         responses={
             200: OpenApiResponse(description="Paginated list of references"),
-            404: OpenApiResponse(description="Task not found"),
+            404: OpenApiResponse(description="Signal not found"),
         },
-        summary="List task references",
-        description="Get list of references for a task, sorted by creation date.",
+        summary="List signal references",
+        description="Get list of references (video segments) for a signal.",
     )
-    @action(detail=True, methods=["get"], url_path="references", required_scopes=["task:read"])
+    @action(detail=True, methods=["get"], url_path="references", required_scopes=["signal:read"])
     def references(self, request, pk=None, **kwargs):
-        task = cast(Task, self.get_object())
-        references = TaskReference.objects.filter(task=task).order_by("-start_time")
+        signal = cast(Signal, self.get_object())
+        references = SignalReference.objects.filter(signal=signal).order_by("-start_time")
         total_count = references.count()
-        serializer = TaskReferenceSerializer(references, many=True)
+        serializer = SignalReferenceSerializer(references, many=True)
         return Response(
             {
                 "results": serializer.data,

@@ -79,20 +79,20 @@ class ClusteringResult:
 
 
 @dataclass
-class TaskMatch:
-    """A match between a cluster and an existing Task."""
+class SignalMatch:
+    """A match between a cluster and an existing Signal."""
 
     cluster_id: int
-    task_id: str
+    signal_id: str
     distance: float
 
 
 @dataclass
 class MatchingResult:
-    """Result from matching clusters to existing Tasks."""
+    """Result from matching clusters to existing Signals."""
 
-    new_clusters: list[Cluster]  # Clusters that need new Tasks
-    matched_clusters: list[TaskMatch]  # Clusters matched to existing Tasks
+    new_clusters: list[Cluster]  # Clusters that need new Signals
+    matched_clusters: list[SignalMatch]  # Clusters matched to existing Signals
 
 
 class ClusterLabel(BaseModel):
@@ -111,24 +111,12 @@ class LabelingResult:
 
 
 @dataclass
-class TaskCreationResult:
-    tasks_created: int
-    tasks_updated: int
-    task_ids: list[str]
-
-
-@dataclass
-class LinkingResult:
-    links_created: int
-
-
-@dataclass
 class WorkflowResult:
     team_id: int
     segments_processed: int
     clusters_found: int
-    tasks_created: int
-    tasks_updated: int
+    signals_created: int
+    signals_updated: int
     links_created: int
     success: bool
     error: str | None = None
@@ -178,25 +166,6 @@ class LabelClustersActivityInputs:
 
 
 @dataclass
-class CreateUpdateTasksActivityInputs:
-    team_id: int
-    new_clusters: list[Cluster]
-    matched_clusters: list[TaskMatch]
-    labels: dict[int, ClusterLabel]
-    segments: list[VideoSegmentMetadata]
-
-
-@dataclass
-class LinkSegmentsActivityInputs:
-    team_id: int
-    task_ids: list[str]  # All task IDs (new and existing)
-    segments: list[VideoSegmentMetadata]
-    segment_to_cluster: dict[str, int]
-    cluster_to_task: dict[int, str]  # cluster_id -> task_id
-    latest_timestamp: str | None
-
-
-@dataclass
 class FetchRecentSessionsActivityInputs:
     team_id: int
     lookback_hours: int
@@ -233,18 +202,18 @@ class PrimeSessionEmbeddingsResult:
 
 
 @dataclass
-class PersistTasksActivityInputs:
+class PersistSignalsActivityInputs:
     team_id: int
     new_clusters: list[Cluster]
-    matched_clusters: list[TaskMatch]
+    matched_clusters: list[SignalMatch]
     labels: dict[int, ClusterLabel]
     segments: list[VideoSegmentMetadata]
     segment_to_cluster: dict[str, int]
 
 
 @dataclass
-class PersistTasksResult:
-    tasks_created: int
-    tasks_updated: int
-    task_ids: list[str]
+class PersistSignalsResult:
+    signals_created: int
+    signals_updated: int
+    signal_ids: list[str]
     links_created: int

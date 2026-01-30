@@ -7,7 +7,7 @@ from posthog.api.shared import UserBasicSerializer
 from posthog.models.integration import Integration
 from posthog.storage import object_storage
 
-from .models import Task, TaskReference, TaskRun
+from .models import Signal, SignalReference, Task, TaskRun
 from .services.title_generator import generate_task_title
 
 PRESIGNED_URL_CACHE_TTL = 55 * 60  # 55 minutes (less than 1 hour URL expiry)
@@ -17,7 +17,6 @@ class TaskSerializer(serializers.ModelSerializer):
     repository = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
     latest_run = serializers.SerializerMethodField()
     created_by = UserBasicSerializer(read_only=True)
-    reference_count = serializers.SerializerMethodField()
 
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
@@ -37,11 +36,6 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "created_by",
-            # Video segment clustering fields
-            "relevant_user_count",
-            "occurrence_count",
-            "last_occurrence_at",
-            "reference_count",
         ]
         read_only_fields = [
             "id",
@@ -51,10 +45,6 @@ class TaskSerializer(serializers.ModelSerializer):
             "updated_at",
             "created_by",
             "latest_run",
-            "relevant_user_count",
-            "occurrence_count",
-            "last_occurrence_at",
-            "reference_count",
         ]
 
     def get_latest_run(self, obj):
@@ -62,9 +52,6 @@ class TaskSerializer(serializers.ModelSerializer):
         if latest_run:
             return TaskRunDetailSerializer(latest_run, context=self.context).data
         return None
-
-    def get_reference_count(self, obj) -> int:
-        return getattr(obj, "reference_count", 0)
 
     def validate_github_integration(self, value):
         """Validate that the GitHub integration belongs to the same team"""
@@ -268,11 +255,11 @@ class TaskRunArtifactPresignResponseSerializer(serializers.Serializer):
     expires_in = serializers.IntegerField(help_text="URL expiry in seconds")
 
 
-class TaskReferenceSerializer(serializers.ModelSerializer):
-    """Serializer for references attached to tasks."""
+class SignalReferenceSerializer(serializers.ModelSerializer):
+    """Serializer for references attached to signals."""
 
     class Meta:
-        model = TaskReference
+        model = SignalReference
         fields = [
             "id",
             "session_id",
@@ -284,6 +271,32 @@ class TaskReferenceSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class SignalSerializer(serializers.ModelSerializer):
+    """Serializer for signals (auto-detected issues from session analysis)."""
+
+    reference_count = serializers.SerializerMethodField()
+    task = TaskSerializer(read_only=True)
+
+    class Meta:
+        model = Signal
+        fields = [
+            "id",
+            "title",
+            "task_prompt",
+            "task",
+            "priority_score",
+            "relevant_user_count",
+            "occurrence_count",
+            "last_occurrence_at",
+            "reference_count",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_reference_count(self, obj) -> int:
+        return getattr(obj, "reference_count", 0)
 
 
 class TaskListQuerySerializer(serializers.Serializer):

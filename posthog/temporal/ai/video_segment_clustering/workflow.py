@@ -14,7 +14,7 @@ with workflow.unsafe.imports_passed_through():
         fetch_segments_activity,
         label_clusters_activity,
         match_clusters_activity,
-        persist_tasks_activity,
+        persist_signals_activity,
         prime_session_embeddings_activity,
     )
     from posthog.temporal.ai.video_segment_clustering.models import (
@@ -24,7 +24,7 @@ with workflow.unsafe.imports_passed_through():
         FetchSegmentsActivityInputs,
         LabelClustersActivityInputs,
         MatchClustersActivityInputs,
-        PersistTasksActivityInputs,
+        PersistSignalsActivityInputs,
         PrimeSessionEmbeddingsActivityInputs,
         WorkflowResult,
     )
@@ -32,15 +32,15 @@ with workflow.unsafe.imports_passed_through():
 
 @workflow.defn(name="video-segment-clustering")
 class VideoSegmentClusteringWorkflow(PostHogWorkflow):
-    """Per-team workflow to cluster video segments and create Tasks.
+    """Per-team workflow to cluster video segments and create Signals.
 
     This workflow orchestrates 6 activities:
     0. Prime: Run session summarization on recently-ended sessions to populate embeddings
     1. Fetch: Query recent video segments from ClickHouse
-    2. Cluster: Clustering segments into groups, i.e. potential tasks
-    3. Match: Match clusters to existing Tasks (deduplication)
+    2. Cluster: Clustering segments into groups, i.e. potential signals
+    3. Match: Match clusters to existing Signals (deduplication)
     4. Label: Generate LLM-based labels for new clusters
-    5. Persist: Create/update Tasks and TaskReferences
+    5. Persist: Create/update Signals and SignalReferences
     """
 
     @staticmethod
@@ -105,8 +105,8 @@ class VideoSegmentClusteringWorkflow(PostHogWorkflow):
                     team_id=inputs.team_id,
                     segments_processed=0,
                     clusters_found=0,
-                    tasks_created=0,
-                    tasks_updated=0,
+                    signals_created=0,
+                    signals_updated=0,
                     links_created=0,
                     success=True,
                     error=None,
@@ -140,8 +140,8 @@ class VideoSegmentClusteringWorkflow(PostHogWorkflow):
                     team_id=inputs.team_id,
                     segments_processed=len(segments),
                     clusters_found=0,
-                    tasks_created=0,
-                    tasks_updated=0,
+                    signals_created=0,
+                    signals_updated=0,
                     links_created=0,
                     success=True,
                     error=None,
@@ -199,11 +199,11 @@ class VideoSegmentClusteringWorkflow(PostHogWorkflow):
                     if label and label.actionable:
                         actionable_new_clusters.append(cluster)
 
-            # Activity 6: Persist tasks and references
+            # Activity 6: Persist signals and references
             persist_result = await workflow.execute_activity(
-                persist_tasks_activity,
+                persist_signals_activity,
                 args=[
-                    PersistTasksActivityInputs(
+                    PersistSignalsActivityInputs(
                         team_id=inputs.team_id,
                         new_clusters=actionable_new_clusters,
                         matched_clusters=matching_result.matched_clusters,
@@ -225,8 +225,8 @@ class VideoSegmentClusteringWorkflow(PostHogWorkflow):
                 team_id=inputs.team_id,
                 segments_processed=len(segments),
                 clusters_found=len(all_clusters),
-                tasks_created=persist_result.tasks_created,
-                tasks_updated=persist_result.tasks_updated,
+                signals_created=persist_result.signals_created,
+                signals_updated=persist_result.signals_updated,
                 links_created=persist_result.links_created,
                 success=True,
                 error=None,
@@ -238,8 +238,8 @@ class VideoSegmentClusteringWorkflow(PostHogWorkflow):
                 team_id=inputs.team_id,
                 segments_processed=0,
                 clusters_found=0,
-                tasks_created=0,
-                tasks_updated=0,
+                signals_created=0,
+                signals_updated=0,
                 links_created=0,
                 success=False,
                 error=str(e),

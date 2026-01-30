@@ -63,39 +63,6 @@ class Task(DeletedMetaFields, models.Model):
         help_text="JSON schema for the task. This is used to validate the output of the task.",
     )
 
-    # Video segment clustering fields (for session_summaries origin_product)
-    cluster_centroid = ArrayField(
-        models.FloatField(),
-        null=True,
-        blank=True,
-        help_text="Embedding centroid for this task's video segment cluster (3072 dimensions)",
-    )
-    cluster_centroid_updated_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When the cluster centroid was last updated",
-    )
-    priority_score = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Calculated priority score for ranking tasks",
-    )
-    relevant_user_count = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Number of unique users affected by this issue",
-    )
-    occurrence_count = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Total number of video segment occurrences (cases)",
-    )
-    last_occurrence_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When this issue was last observed in a video segment",
-    )
-
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -554,43 +521,119 @@ class SandboxEnvironment(UUIDModel):
         return []
 
 
-class TaskReference(UUIDModel):
-    """Links a reference (video segment, in the future also errors etc.) to a Task.
+class Signal(UUIDModel):
+    """Represents a detected pattern/issue from video segment clustering.
 
-    Each record represents one occurrence that contributed to or matches a Task's cluster.
+    Signals are automatically created by the video_segment_clustering workflow.
+    Users can accept a Signal to create a Task from it.
+    """
+
+    team = models.ForeignKey(
+        "posthog.Team",
+        on_delete=models.CASCADE,
+        related_name="signals",
+    )
+    title = models.CharField(
+        max_length=255,
+        help_text="LLM-generated title describing the detected issue",
+    )
+    task_prompt = models.TextField(
+        help_text="LLM-generated description/prompt for what to fix",
+    )
+    task = models.ForeignKey(
+        "Task",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_signal",
+        help_text="Task created from this signal (if accepted)",
+    )
+
+    # Clustering fields
+    cluster_centroid = ArrayField(
+        models.FloatField(),
+        null=True,
+        blank=True,
+        help_text="Embedding centroid for this signal's cluster (3072 dimensions)",
+    )
+    cluster_centroid_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the cluster centroid was last updated",
+    )
+    priority_score = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Calculated priority score for ranking signals",
+    )
+    relevant_user_count = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of unique users affected by this issue",
+    )
+    occurrence_count = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Total number of video segment occurrences",
+    )
+    last_occurrence_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this issue was last observed",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "posthog_signal"
+        ordering = ["-priority_score", "-created_at"]
+
+    def __str__(self):
+        return f"Signal: {self.title}"
+
+
+class SignalReference(UUIDModel):
+    """Links a reference (video segment) to a Signal.
+
+    Each record represents one occurrence that contributed to or matches a Signal's cluster.
     Used for tracking cases and calculating priority.
     """
 
-    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="references")
+    signal = models.ForeignKey(
+        Signal,
+        on_delete=models.CASCADE,
+        related_name="references",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Reference identification
     session_id = models.CharField(max_length=255)
-    start_time = models.DateTimeField(null=False, blank=False)
+    start_time = models.DateTimeField()
     end_time = models.DateTimeField(null=True, blank=True)
     distinct_id = models.CharField(
-        max_length=255, help_text="The distinct_id of the user who experienced the reference"
+        max_length=255,
+        help_text="The distinct_id of the user who experienced the reference",
     )
     content = models.TextField(
         blank=True,
-        help_text="The reference description text (i.e. what happened)",
+        help_text="The reference description text (what happened in this segment)",
     )
 
     # Clustering metadata
     distance_to_centroid = models.FloatField(
         null=True,
         blank=True,
-        help_text="Cosine distance from this reference to the task's cluster centroid",
+        help_text="Cosine distance from this reference to the signal's cluster centroid",
     )
 
     class Meta:
-        db_table = "posthog_task_reference"
+        db_table = "posthog_signal_reference"
         constraints = [
             models.UniqueConstraint(
-                fields=["task_id", "session_id", "start_time", "end_time"],
-                name="unique_task_reference",
+                fields=["signal_id", "session_id", "start_time", "end_time"],
+                name="unique_signal_reference",
             ),
         ]
 
     def __str__(self):
-        return f"Reference {self.session_id}:{self.start_time}-{self.end_time} -> Task {self.task_id}"
+        return f"Reference {self.session_id}:{self.start_time}-{self.end_time} -> Signal {self.signal_id}"

@@ -26,7 +26,7 @@ async def fetch_segments_activity(inputs: FetchSegmentsActivityInputs) -> FetchS
 
     Queries document_embeddings for video segments within the lookback window.
     Uses a configurable lookback period (default 7 days) to ensure idempotent
-    processing - segments are deduplicated at the Task and TaskReference level.
+    processing - segments are deduplicated at the Signal and SignalReference level.
     """
     team = await Team.objects.aget(id=inputs.team_id)
     video_segment_metadata_rows = await fetch_video_segment_metadata_rows(

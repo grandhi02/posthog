@@ -58,7 +58,7 @@ from .video_segment_clustering.activities import (
     fetch_segments_activity,
     label_clusters_activity,
     match_clusters_activity,
-    persist_tasks_activity,
+    persist_signals_activity,
     prime_session_embeddings_activity,
 )
 from .video_segment_clustering.workflow import VideoSegmentClusteringWorkflow
@@ -106,7 +106,7 @@ ACTIVITIES = [
     cluster_segments_activity,
     match_clusters_activity,
     label_clusters_activity,
-    persist_tasks_activity,
+    persist_signals_activity,
 ]
 
 __all__ = [
