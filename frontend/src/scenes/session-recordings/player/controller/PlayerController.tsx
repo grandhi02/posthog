@@ -226,9 +226,11 @@ export function PlayerController(): JSX.Element {
             <Seekbar />
             <div className="w-full px-2 py-1 relative flex items-center justify-between" ref={ref}>
                 <div className="flex gap-0.5 items-center justify-center">
+                    <SkipToStart />
                     <SeekSkip direction="backward" />
                     <PlayPauseButton />
                     <SeekSkip direction="forward" />
+                    <SkipToNext />
                     <Timestamp size={size} />
                 </div>
                 <div className="flex gap-0.5 justify-end items-center">
@@ -240,8 +242,7 @@ export function PlayerController(): JSX.Element {
                             <ClipRecording />
                         </>
                     )}
-                    <SkipToStart />
-                    <SkipToNext />
+
                     <FullScreen />
                 </div>
             </div>
