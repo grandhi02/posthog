@@ -89,8 +89,6 @@ async function registerContextMillResources(server: McpServer, context: Context)
                 }
             }
 
-            console.info(`Registering resource: ${entry.id}`)
-
             server.registerResource(
                 entry.name,
                 entry.uri,
@@ -109,8 +107,6 @@ async function registerContextMillResources(server: McpServer, context: Context)
                 })
             )
         }
-
-        console.info(`Registered ${manifest.resources.length} resources from context-mill`)
     } catch (error) {
         console.error('Failed to register context-mill resources:', error)
     }
