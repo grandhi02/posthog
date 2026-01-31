@@ -575,7 +575,7 @@ async fn test_offset_commits_with_routing_processor() -> Result<()> {
 /// This test:
 /// 1. Creates a topic with 10 messages (offsets 0-9)
 /// 2. Consumes all 10 messages
-/// 3. Sends a Seek command to reset position to offset 5
+/// 3. Sends a SeekPartitions command to reset position to offset 5
 /// 4. Verifies messages 5-9 are re-delivered (5 messages)
 #[tokio::test]
 async fn test_seek_resets_local_consume_position() -> Result<()> {
