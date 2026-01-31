@@ -217,18 +217,18 @@ async fn test_checkpoint_export_import_via_minio() -> Result<()> {
         "Importer should be available"
     );
 
-    let import_result = importer
+    let (import_path, import_metadata) = importer
         .import_checkpoint_for_topic_partition(test_topic, test_partition)
         .await?;
 
-    info!(path = ?import_result, "Imported checkpoint");
+    info!(path = ?import_path, consumer_offset = import_metadata.consumer_offset, "Imported checkpoint");
     assert!(
-        import_result.exists(),
+        import_path.exists(),
         "Imported checkpoint directory should exist"
     );
 
     // Verify each file from metadata was imported
-    let imported_files: Vec<_> = std::fs::read_dir(&import_result)?
+    let imported_files: Vec<_> = std::fs::read_dir(&import_path)?
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
@@ -266,8 +266,8 @@ async fn test_checkpoint_export_import_via_minio() -> Result<()> {
 
     // Verify import result is within the store base directory
     assert!(
-        import_result.starts_with(tmp_import_dir.path()),
-        "Imported checkpoint should be within store base dir: {import_result:?} not in {:?}",
+        import_path.starts_with(tmp_import_dir.path()),
+        "Imported checkpoint should be within store base dir: {import_path:?} not in {:?}",
         tmp_import_dir.path()
     );
 
@@ -282,10 +282,10 @@ async fn test_checkpoint_export_import_via_minio() -> Result<()> {
     drop(store);
 
     // Open a new store from the imported checkpoint to verify it's a valid RocksDB
-    info!(path = ?import_result, "Opening store from imported checkpoint");
+    info!(path = ?import_path, "Opening store from imported checkpoint");
     let restored_store_config = DeduplicationStoreConfig {
         // Checkpoint files are imported directly to the store directory
-        path: import_result.clone(),
+        path: import_path.clone(),
         max_capacity: 1_000_000,
     };
     let restored_store = DeduplicationStore::new(
@@ -484,7 +484,7 @@ async fn test_fallback_after_failed_attempt() -> Result<()> {
         "Import should succeed via fallback: {:?}",
         result.err()
     );
-    let import_path = result.unwrap();
+    let (import_path, import_metadata) = result.unwrap();
 
     // Verify the imported checkpoint is from the OLDER (successful) checkpoint
     // by checking the path matches the older checkpoint's expected store path
@@ -496,7 +496,8 @@ async fn test_fallback_after_failed_attempt() -> Result<()> {
 
     info!(
         import_path = ?import_path,
-        checkpoint_id = older_metadata.id,
+        checkpoint_id = import_metadata.id,
+        consumer_offset = import_metadata.consumer_offset,
         "Successfully imported via fallback to older checkpoint"
     );
 
@@ -609,7 +610,7 @@ async fn test_parent_cancellation_stops_all_attempts() -> Result<()> {
     // The result may succeed (if download completed before cancellation) or fail
     // Either outcome is acceptable - we just verify no panic occurs
     info!(
-        result = ?result.as_ref().map(|p| p.display().to_string()).map_err(|e| e.to_string()),
+        result = ?result.as_ref().map(|(path, _)| path.display().to_string()).map_err(|e| e.to_string()),
         "Mid-download cancellation test completed (result depends on timing)"
     );
 

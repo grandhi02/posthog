@@ -668,18 +668,18 @@ async fn test_seek_resets_local_consume_position() -> Result<()> {
         "Should have received all initial messages"
     );
 
-    // Step 4: Send Seek command to reset to offset 5
+    // Step 4: Send SeekPartitions command to reset to offset 5
     let command_sender = rebalance_handler
         .get_command_sender()
         .expect("Command sender should be available after partition assignment");
 
+    let mut seek_tpl = TopicPartitionList::new();
+    seek_tpl
+        .add_partition_offset(&test_topic, 0, Offset::Offset(seek_to_offset))
+        .expect("Failed to add partition offset");
     command_sender
-        .send(ConsumerCommand::Seek {
-            topic: test_topic.clone(),
-            partition: 0,
-            offset: Offset::Offset(seek_to_offset),
-        })
-        .expect("Failed to send seek command");
+        .send(ConsumerCommand::SeekPartitions(seek_tpl))
+        .expect("Failed to send seek_partitions command");
 
     // Wait for more messages to arrive (should get messages 5-9 again)
     let expected_after_seek = messages_to_send + (messages_to_send - seek_to_offset as usize);

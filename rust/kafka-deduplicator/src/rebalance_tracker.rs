@@ -44,10 +44,18 @@ use crate::metrics_const::{
     REBALANCING_COUNT,
 };
 
-/// Type alias for the shared task handle. The closure maps JoinHandle's Result to ()
-/// so it can be Clone (required by Shared).
-type SharedTaskHandle =
-    Shared<futures::future::Map<JoinHandle<()>, fn(Result<(), tokio::task::JoinError>) -> ()>>;
+/// Result type for partition setup tasks: Some((partition, offset)) if checkpoint was imported,
+/// None if import failed/skipped/cancelled (will use fallback empty store).
+pub type SetupTaskResult = Option<(Partition, i64)>;
+
+/// Type alias for the shared task handle. The closure extracts the task result,
+/// returning None if the task panicked.
+type SharedTaskHandle = Shared<
+    futures::future::Map<
+        JoinHandle<SetupTaskResult>,
+        fn(Result<SetupTaskResult, tokio::task::JoinError>) -> SetupTaskResult,
+    >,
+>;
 
 /// Tracks a partition setup task with its cancellation token.
 ///
@@ -290,15 +298,21 @@ impl RebalanceTracker {
     ///
     /// Must be called after `try_claim_partition_setup()` returns true.
     /// Converts the JoinHandle to a Shared future so multiple callers can await it.
-    pub fn finalize_partition_setup(&self, partition: &Partition, handle: JoinHandle<()>) {
+    pub fn finalize_partition_setup(
+        &self,
+        partition: &Partition,
+        handle: JoinHandle<SetupTaskResult>,
+    ) {
         use futures::future::FutureExt;
 
-        // Helper function to discard JoinHandle result (must be fn, not closure, for type matching)
-        fn discard_result(_: Result<(), tokio::task::JoinError>) {}
+        // Helper function to extract result, returning None if task panicked
+        fn extract_result(r: Result<SetupTaskResult, tokio::task::JoinError>) -> SetupTaskResult {
+            r.unwrap_or(None)
+        }
 
         if let Some(mut task) = self.partition_setup_tasks.get_mut(partition) {
-            // Map the JoinHandle result to () so it's Clone (required for Shared)
-            let shared_handle = handle.map(discard_result as fn(_) -> ()).shared();
+            // Map the JoinHandle result to extract the SetupTaskResult (Clone for Shared)
+            let shared_handle = handle.map(extract_result as fn(_) -> _).shared();
             task.handle = Some(shared_handle);
         }
     }
@@ -306,6 +320,8 @@ impl RebalanceTracker {
     /// Get the setup task handle for a partition (if finalized).
     ///
     /// Returns a clone of the Shared handle that can be awaited by multiple callers.
+    /// Awaiting returns `SetupTaskResult`: Some((partition, offset)) for successful import,
+    /// None for failed/skipped/cancelled imports.
     /// Returns None if no task exists OR if task is claimed but not yet finalized.
     pub fn get_setup_task(&self, partition: &Partition) -> Option<SharedTaskHandle> {
         self.partition_setup_tasks
@@ -619,8 +635,9 @@ mod tests {
         assert!(tracker.try_claim_partition_setup(&p0, token));
         assert!(tracker.get_setup_task(&p0).is_none()); // Not yet finalized
 
-        // Spawn a simple task
-        let handle = tokio::spawn(async { /* do nothing */ });
+        // Spawn a task that returns a seek offset
+        let p0_clone = p0.clone();
+        let handle = tokio::spawn(async move { Some((p0_clone, 12345i64)) });
 
         // Finalize with the handle
         tracker.finalize_partition_setup(&p0, handle);
@@ -628,9 +645,13 @@ mod tests {
         // Now get_setup_task should return Some
         assert!(tracker.get_setup_task(&p0).is_some());
 
-        // Can await the task
+        // Can await the task and get the result
         let task = tracker.get_setup_task(&p0).unwrap();
-        task.await;
+        let result = task.await;
+        assert!(result.is_some());
+        let (partition, offset) = result.unwrap();
+        assert_eq!(partition, p0);
+        assert_eq!(offset, 12345);
     }
 
     #[test]
@@ -686,7 +707,7 @@ mod tests {
 
         // Claim and finalize
         assert!(tracker.try_claim_partition_setup(&p0, token));
-        let handle = tokio::spawn(async { /* do nothing */ });
+        let handle = tokio::spawn(async { None }); // No offset (failed import)
         tracker.finalize_partition_setup(&p0, handle);
 
         assert!(tracker.has_setup_task(&p0));
