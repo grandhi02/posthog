@@ -85,6 +85,9 @@ class SignupSerializer(serializers.Serializer):
         max_length=128, required=False, allow_blank=True, default=""
     )
     referral_source: serializers.Field = serializers.CharField(max_length=1000, required=False, allow_blank=True)
+    # First-party OAuth integration
+    oauth_client_id: serializers.Field = serializers.CharField(max_length=256, required=False, allow_blank=True)
+    oauth_code_verifier: serializers.Field = serializers.CharField(max_length=256, required=False, allow_blank=True)
 
     # Slightly hacky: self vars for internal use
     is_social_signup: bool
@@ -166,6 +169,9 @@ class SignupSerializer(serializers.Serializer):
         organization_name = validated_data.pop("organization_name", f"{validated_data['first_name']}'s Organization")
         role_at_organization = validated_data.pop("role_at_organization", "")
         referral_source = validated_data.pop("referral_source", "")
+        # OAuth fields handled in to_representation
+        validated_data.pop("oauth_client_id", None)
+        validated_data.pop("oauth_code_verifier", None)
 
         # For passkey signup, set password to None and use the pre-generated UUID
         if passkey_credential:
@@ -275,7 +281,100 @@ class SignupSerializer(serializers.Serializer):
 
         data = UserBasicSerializer(instance=instance).data
         data["redirect_url"] = get_redirect_url(data["uuid"], data["is_email_verified"], next_url)
+
+        # Include OAuth tokens for first-party applications
+        oauth_client_id = request.data.get("oauth_client_id") if request and request.data else None
+        oauth_code_verifier = request.data.get("oauth_code_verifier") if request and request.data else None
+
+        if oauth_client_id and oauth_code_verifier:
+            oauth_tokens = self._generate_oauth_tokens_for_first_party(instance, oauth_client_id, oauth_code_verifier)
+            if oauth_tokens:
+                data["oauth_tokens"] = oauth_tokens
+
         return data
+
+    def _generate_oauth_tokens_for_first_party(self, user: User, client_id: str, code_verifier: str) -> Optional[dict]:
+        """Generate OAuth tokens for first-party app signup."""
+        import uuid as uuid_module
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from oauth2_provider.settings import oauth2_settings
+
+        from posthog.models import OAuthApplication, Team
+        from posthog.models.oauth import OAuthAccessToken, OAuthRefreshToken
+        from posthog.models.utils import generate_random_oauth_access_token, generate_random_oauth_refresh_token
+
+        try:
+            application = OAuthApplication.objects.get(client_id=client_id)
+        except OAuthApplication.DoesNotExist:
+            logger.warning("First-party signup: unknown OAuth client_id", client_id=client_id)
+            return None
+
+        if not application.is_first_party:
+            logger.warning(
+                "First-party signup: application is not first-party",
+                client_id=client_id,
+            )
+            return None
+
+        # Get all teams the user has access to (from their new org)
+        scoped_teams = list(Team.objects.filter(organization__members=user).values_list("pk", flat=True))
+
+        expires_in = cast(int, oauth2_settings.ACCESS_TOKEN_EXPIRE_SECONDS)
+        expires = timezone.now() + timedelta(seconds=expires_in)
+
+        # Default scopes for first-party apps (matches Twig's OAUTH_SCOPES)
+        default_scopes = (
+            "user:read project:read task:write llm_gateway:read integration:read "
+            "introspection dashboard:read error_tracking:read event_definition:read "
+            "experiment:read feature_flag:read insight:read organization:read "
+            "property_definition:read query:read survey:read warehouse_table:read "
+            "dashboard:write experiment:write feature_flag:write insight:write survey:write"
+        )
+
+        # Generate tokens with proper prefixes (pha_ for access, phr_ for refresh)
+        access_token_value = generate_random_oauth_access_token(None)
+        refresh_token_value = generate_random_oauth_refresh_token(None)
+
+        # Create access token
+        access_token = OAuthAccessToken.objects.create(
+            user=user,
+            application=application,
+            token=access_token_value,
+            expires=expires,
+            scope=default_scopes,
+            scoped_teams=scoped_teams,
+            scoped_organizations=[],
+        )
+
+        # Create refresh token
+        OAuthRefreshToken.objects.create(
+            user=user,
+            application=application,
+            access_token=access_token,
+            token=refresh_token_value,
+            token_family=uuid_module.uuid4(),
+            scoped_teams=scoped_teams,
+            scoped_organizations=[],
+        )
+
+        logger.info(
+            "First-party signup: OAuth tokens generated",
+            user_id=user.pk,
+            client_id=client_id,
+        )
+
+        return {
+            "access_token": access_token_value,
+            "refresh_token": refresh_token_value,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "scope": default_scopes,
+            "scoped_teams": scoped_teams,
+            "scoped_organizations": [],
+        }
 
 
 class SignupEmailPrecheckSerializer(serializers.Serializer):

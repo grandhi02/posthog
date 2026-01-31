@@ -156,6 +156,12 @@ class OAuthApplication(AbstractApplication):
         default=False, help_text="True if this application has been verified by PostHog"
     )
 
+    # First-party flag - manually set by PostHog staff
+    # First-party apps skip the OAuth consent screen and can use direct token exchange
+    is_first_party: models.BooleanField = models.BooleanField(
+        default=False, help_text="True if this is a first-party PostHog application that skips OAuth consent"
+    )
+
 
 class OAuthAccessToken(AbstractAccessToken):
     class Meta(AbstractAccessToken.Meta):

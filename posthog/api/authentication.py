@@ -149,6 +149,19 @@ def sso_login(request: HttpRequest, backend: str) -> HttpResponse:
     if not sso_providers[backend]:
         return redirect(f"/login?error_code=improperly_configured_sso")
 
+    # Store OAuth params in session if this is a first-party app flow
+    # These will be used by complete_first_party_oauth_flow after authentication
+    oauth_client_id = request.GET.get("oauth_client_id")
+    if oauth_client_id:
+        request.session["first_party_oauth_params"] = {
+            "client_id": oauth_client_id,
+            "redirect_uri": request.GET.get("oauth_redirect_uri", ""),
+            "code_challenge": request.GET.get("oauth_code_challenge", ""),
+            "scope": request.GET.get("oauth_scope", ""),
+            "state": request.GET.get("oauth_state", ""),
+        }
+        request.session.save()
+
     return auth(request, backend)
 
 

@@ -11,6 +11,7 @@ from posthog.api.oauth import (
     OAuthTokenView,
     OAuthUserInfoView,
 )
+from posthog.api.oauth.first_party import FirstPartyTokenView, FirstPartyTwoFactorView
 from posthog.utils import opt_slash_path
 
 app_name = "oauth2_provider"  # We need this to match the namepace of django-oauth-toolkit for reverse lookups within their views to work
@@ -33,4 +34,7 @@ urlpatterns = [
     path(".well-known/jwks.json", OAuthJwksInfoView.as_view(), name="jwks-info"),
     opt_slash_path("oauth/userinfo", OAuthUserInfoView.as_view(), name="user-info"),
     opt_slash_path("oauth/register", DynamicClientRegistrationView.as_view(), name="register"),
+    # First-party OAuth endpoints for Twig and other PostHog applications
+    opt_slash_path("oauth/first-party-token", FirstPartyTokenView.as_view(), name="first-party-token"),
+    opt_slash_path("oauth/first-party-token/2fa", FirstPartyTwoFactorView.as_view(), name="first-party-token-2fa"),
 ]

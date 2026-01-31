@@ -215,6 +215,7 @@ SOCIAL_AUTH_PIPELINE = (
     "social_core.pipeline.social_auth.load_extra_data",
     "social_core.pipeline.user.user_details",
     "posthog.api.authentication.social_login_notification",
+    "posthog.api.oauth.first_party.complete_first_party_oauth_flow",
 )
 
 SOCIAL_AUTH_STRATEGY = "social_django.strategy.DjangoStrategy"

@@ -620,3 +620,13 @@ class WidgetTeamThrottle(SimpleRateThrottle):
 class SymbolSetUploadSustainedRateThrottle(PersonalApiKeyRateThrottle):
     scope = "symbol_set_upload_sustained"
     rate = "12000/hour"
+
+
+class FirstPartyTokenThrottle(IPThrottle):
+    """
+    Rate limit for first-party OAuth token endpoint (Twig login).
+    Limits by IP address to prevent credential stuffing attacks.
+    """
+
+    scope = "first_party_token"
+    rate = "20/minute"
