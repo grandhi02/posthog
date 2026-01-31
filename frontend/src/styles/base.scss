@@ -541,7 +541,6 @@
     --color-skeleton-light: rgb(
         190 190 190 / 20%
     ); // Equivalent to --color-neutral-200 but with transparency, improve browser compatibility
-
     --color-skeleton-dark: rgb(
         129 129 129 / 24%
     ); // Equivalent to --color-neutral-400 but with transparency, improve browser compatibility
@@ -1965,7 +1964,6 @@
 // Setup highlight animation - used by quick start to draw attention to UI elements
 .setup-highlight-pulse {
     position: relative !important;
-    z-index: 100 !important;
     border-radius: var(--radius);
     animation: setup-highlight-pulse 1s ease-in-out 3 !important;
 }
